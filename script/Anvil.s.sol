@@ -27,12 +27,14 @@ contract CounterScript is Script {
     function run() public {
         vm.broadcast();
         IPoolManager manager = deployPoolManager();
+        console.log("manager contract deployed at:", address(manager));
 
         // hook contracts must have specific flags encoded in the address
         uint160 permissions = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
                 | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
         );
+        
 
         // Mine a salt that will produce a hook address with the correct permissions
         (address hookAddress, bytes32 salt) =
@@ -44,16 +46,31 @@ contract CounterScript is Script {
         vm.broadcast();
         Counter counter = new Counter{salt: salt}(manager);
         require(address(counter) == hookAddress, "CounterScript: hook address mismatch");
+        
+        console.log("Hook contract deployed at:", address(counter));
 
         // Additional helpers for interacting with the pool
         vm.startBroadcast();
         (PoolModifyLiquidityTest lpRouter, PoolSwapTest swapRouter,) = deployRouters(manager);
         vm.stopBroadcast();
 
-        // test the lifecycle (create pool, add liquidity, swap)
-        vm.startBroadcast();
-        testLifecycle(manager, address(counter), lpRouter, swapRouter);
-        vm.stopBroadcast();
+        // add MockERC20 tokens
+        (MockERC20 token0, MockERC20 token1) = deployTokens();
+        // mint tokens to the sender
+        token0.mint(msg.sender, 100_000 ether);
+        token1.mint(msg.sender, 100_000 ether);
+        bytes memory ZERO_BYTES = new bytes(0);
+
+        // initialize the pool
+        int24 tickSpacing = 60;
+        PoolKey memory poolKey =
+            PoolKey(Currency.wrap(address(token0)), Currency.wrap(address(token1)), 3000, tickSpacing, IHooks(counter));
+        manager.initialize(poolKey, Constants.SQRT_PRICE_1_1, ZERO_BYTES);
+
+        // // test the lifecycle (create pool, add liquidity, swap)
+        // vm.startBroadcast();
+        // testLifecycle(manager, address(counter), lpRouter, swapRouter);
+        // vm.stopBroadcast();
     }
 
     // -----------------------------------------------------------
@@ -70,6 +87,11 @@ contract CounterScript is Script {
         lpRouter = new PoolModifyLiquidityTest(manager);
         swapRouter = new PoolSwapTest(manager);
         donateRouter = new PoolDonateTest(manager);
+        
+        console.log("lpRouter contract deployed at:", address(lpRouter));
+        console.log("swapRouter contract deployed at:", address(swapRouter));
+        console.log("donateRouter contract deployed at:", address(donateRouter));
+
     }
 
     function deployTokens() internal returns (MockERC20 token0, MockERC20 token1) {
@@ -82,6 +104,9 @@ contract CounterScript is Script {
             token0 = tokenB;
             token1 = tokenA;
         }
+        console.log("token0 contract deployed at:", address(token0));
+        console.log("token1 contract deployed at:", address(token1));
+
     }
 
     function testLifecycle(
